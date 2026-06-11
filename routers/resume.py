@@ -1,0 +1,88 @@
+from fastapi import APIRouter,HTTPException
+from fastapi import UploadFile,File
+from fastapi import Depends
+import fitz
+from sqlalchemy.orm import Session
+
+from app.dependencies.auth import get_current_user
+from app.models.user import User
+from app.database.database import get_db
+from app.models.resume import Resume
+from app.ai.resume_analyzer import analyze_resume_text
+from app.models.resume_analysis import ResumeAnalysis
+
+router=APIRouter(
+    prefix="/resume",
+    tags=["Resume"]
+)
+
+@router.post("/upload")
+def upload_resume(file:UploadFile=File(...),current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    pdf_bytes=file.file.read()
+
+    pdf_document=fitz.open(
+        stream=pdf_bytes,
+        filetype="pdf"
+    )    
+    
+    extracted_text=""
+
+    for page in pdf_document:
+        extracted_text+=page.get_text()
+
+    resume=Resume(
+        user_id=current_user.id,
+        filename=file.filename,
+        resume_text=extracted_text
+    )
+
+    db.add(resume)
+
+    db.commit()
+
+    db.refresh(resume)
+    return {
+        "message":"Resume uploaded successfully",
+        "resume_id":resume.id,
+        "filename":resume.filename,
+        "user_id":resume.user_id,
+        "text_preview":extracted_text[:500]
+    }
+
+@router.post("/analyze/{resume_id}")
+def analyze_resume(
+    resume_id:int,current_user:User=Depends(get_current_user),db:Session=Depends(get_db)
+):
+    resume=(
+        db.query(Resume).filter(
+            Resume.id==resume_id,
+            Resume.user_id==current_user.id
+        ).first()
+    )
+    if not resume:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume Not Found"
+        )
+    
+    analysis=analyze_resume_text(resume.resume_text)
+    
+    analysis_db=ResumeAnalysis(
+        resume_id=resume.id,
+        skills=analysis['skills'],
+        projects=analysis['projects'],
+        strengths=analysis['strengths'],
+        weaknesses=analysis['weaknesses']
+    )
+
+    db.add(analysis_db)
+
+    db.commit()
+
+    db.refresh(analysis_db)
+
+    return {
+        "analysis_id": analysis_db.id,
+        "resume_id": resume.id,
+        "analysis": analysis
+    }
