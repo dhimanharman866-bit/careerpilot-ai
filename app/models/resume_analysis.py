@@ -17,6 +17,7 @@ class ResumeAnalysis(Base):
     projects=Column(JSON)
     strengths=Column(JSON)
     weaknesses=Column(JSON)
+    score=Column(JSON)
 
     created_at=Column(DateTime,default=datetime.utcnow)
 

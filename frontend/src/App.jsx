@@ -8,6 +8,11 @@ import ResumeUpload from "./pages/ResumeUpload";
 import ResumeAnalysis from "./pages/ResumeAnalysis";
 import InterviewSetup from "./pages/InterviewSetup";
 import Interview from "./pages/Interview";
+import InterviewSummary from "./pages/InterviewSummary";
+import InterviewHistory from "./pages/InterviewHistory";
+import PlacementReadiness from "./pages/PlacementReadiness";
+import VoiceInterviewTest from "./pages/VoiceInterview";
+import VideoInterview from "./pages/VideoInterview";
 function App() {
   return (
     <BrowserRouter>
@@ -56,7 +61,32 @@ function App() {
             </DashboardLayout>
           }
         />
-          
+        <Route
+        path="/interview-summary/:sessionId"
+        element={<DashboardLayout>
+          <InterviewSummary />
+        </DashboardLayout>}
+        />
+        <Route
+        path="/history"
+        element={<DashboardLayout>
+          <InterviewHistory />
+        </DashboardLayout>}
+        />
+        <Route
+        path="/placement"
+        element={<DashboardLayout>
+          <PlacementReadiness />
+        </DashboardLayout>}
+        />
+        <Route
+        path="/voice-interview"
+        element={<DashboardLayout><VoiceInterviewTest /></DashboardLayout>}
+        />
+        <Route
+        path="/video-interview"
+        element={<DashboardLayout><VideoInterview /></DashboardLayout>}
+        />
       </Routes>
     </BrowserRouter>
   );

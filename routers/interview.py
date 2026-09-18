@@ -4,7 +4,7 @@ from fastapi import (
     HTTPException
 )
 import shutil
-
+import tempfile
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
@@ -126,54 +126,85 @@ def submit_answer(
     "improvements": evaluation["improvements"]
     }
 
-@router.get("/summary/{session_id}")
-def get_interview_summary(session_id:int,current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
-    session=(db.query(InterviewSession).filter(InterviewSession.id==session_id).first())
-    if session.user_id!=current_user.id:
+@router.get("/report/{session_id}")
+def get_interview_report(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    session = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.id == session_id)
+        .first()
+    )
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found"
+        )
+
+    if session.user_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="Not authorized"
         )
-    if session is None:
-        raise HTTPException(
-            status_code=404,
-            detail="session not found"
-        )
-    questions=db.query(InterviewSession).filter(InterviewSession.id==session.id).all()
 
-    qa_data=[]
-    score=[]
+    questions = (
+        db.query(InterviewQuestion)
+        .filter(InterviewQuestion.session_id == session.id)
+        .all()
+    )
+
+    question_ids = [question.id for question in questions]
+
+    answers = (
+        db.query(InterviewAnswer)
+        .filter(InterviewAnswer.question_id.in_(question_ids))
+        .all()
+    )
+
+    answer_map = {
+        answer.question_id: answer
+        for answer in answers
+    }
+
+    question_feedback = []
+    scores = []
+
+    # Merge each question with its evaluated answer
     for question in questions:
-        answer=(db.query(InterviewAnswer).filter(InterviewAnswer.question_id==question.id).first())
+        answer = answer_map.get(question.id)
+
         if answer is None:
             continue
 
-        qa_data.append(
-            {
-                "question":question.question,
-                "answer":answer.answer,
-                "score":answer.score,
-                "feedback":answer.feedback
-            }
-        )
+        question_feedback.append({
+            "question": question.question,
+            "difficulty": question.difficulty,
+            "user_answer": answer.answer,
+            "score": answer.score,
+            "feedback": answer.feedback
+            })
 
-        score.append(
-            answer.score
-        )
-    
-    average_score=(
-        sum(score)/len(score)
-        if score
-        else 0
+        scores.append(answer.score)
+
+    overall_score = (
+        sum(scores) / len(scores)
+        if scores else 0
     )
-    summary = generate_interview_summary(
-        qa_data=qa_data,
-        average_score=average_score
+
+    overall_feedback = generate_interview_summary(
+        qa_data=question_feedback,
+        average_score=overall_score
     )
+
     return {
-        "session_id":session.id,
-        "average_score":average_score,
-        "summary":summary
+        "session_id": session.id,
+        "target_role": session.target_role,
+        "overall_score": overall_score,
+        "overall_feedback": overall_feedback,
+        "question_feedback": question_feedback
     }
 
 @router.get("/history")
@@ -199,38 +230,41 @@ def get_interview_history(current_user:User=Depends(get_current_user),db:Session
                 "session_id": session.id,
                 "target_role": session.target_role,
                 "created_at": session.created_at,
-                "average_score": average_score
+                "average_score": round(average_score,1)
             }
         )
-@router.get("/history")
-def get_interview_history(current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
-    sessions=db.query(InterviewSession).filter(InterviewSession.user_id==current_user.id).order_by(InterviewSession.created_at.desc()).all()
-    history=[]
-    for session in sessions:
-        questions=db.query(InterviewQuestion).filter(InterviewQuestion.session_id==session.id).all()
+    return{
+        "history":history
+        }
+# @router.get("/history")
+# def get_interview_history(current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+#     sessions=db.query(InterviewSession).filter(InterviewSession.user_id==current_user.id).order_by(InterviewSession.created_at.desc()).all()
+#     history=[]
+#     for session in sessions:
+#         questions=db.query(InterviewQuestion).filter(InterviewQuestion.session_id==session.id).all()
 
-        score=[]
-        for question in questions:
-            answer=db.query(InterviewAnswer).filter(InterviewAnswer.question_id==question.id).first()
+#         score=[]
+#         for question in questions:
+#             answer=db.query(InterviewAnswer).filter(InterviewAnswer.question_id==question.id).first()
 
-            if answer:
-                score.append(answer.score)
-        average_score = (
-            sum(score) / len(score)
-            if score
-            else 0
-        )
-        history.append(
-            {
-                "session_id": session.id,
-                "target_role": session.target_role,
-                "created_at": session.created_at,
-                "average_score": average_score
-            }
-        )
-    return {
-        "history": history
-    }
+#             if answer:
+#                 score.append(answer.score)
+#         average_score = (
+#             sum(score) / len(score)
+#             if score
+#             else 0
+#         )
+#         history.append(
+#             {
+#                 "session_id": session.id,
+#                 "target_role": session.target_role,
+#                 "created_at": session.created_at,
+#                 "average_score": average_score
+#             }
+#         )
+#     return {
+#         "history": history
+#     }
 
 @router.post("/adaptive-answer")
 def adaptive_answer(
@@ -319,19 +353,14 @@ def adaptive_voice_answer(
             detail="Question not found"
         )
 
-    temp_file = f"temp_{audio_file.filename}"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp:
+        shutil.copyfileobj(audio_file.file, temp)
+        temp_file = temp.name
 
-    with open(temp_file, "wb") as buffer:
-        shutil.copyfileobj(
-            audio_file.file,
-            buffer
-        )
-
-    transcript = transcribe_audio(
-        temp_file
-    )
-
-    os.remove(temp_file)
+    try:
+       transcript = transcribe_audio(temp_file)
+    finally:
+       os.remove(temp_file)
 
     evaluation = evaluate_answer(
         question=question.question,
@@ -389,112 +418,149 @@ def adaptive_voice_answer(
     db.refresh(next_question)
 
     return {
+        "current_question": question.question,
+
         "transcript": transcript,
 
+        "score": evaluation["score"],
+        "feedback": evaluation["feedback"],
+        "strengths": evaluation    ["strengths"],
+        "improvements": evaluation    ["improvements"],
+
+        "next_question": next_question.    question,
+        "next_question_id": next_question.    id,
+
+        "difficulty": difficulty
+    }
+
+@router.post("/adaptive-video-answer")
+def adaptive_video_answer(
+    question_id: int,
+    video_file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # ── 1. Fetch question and verify ownership before touching any files ──
+    question = (
+        db.query(InterviewQuestion)
+        .filter(InterviewQuestion.id == question_id)
+        .first()
+    )
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    session = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.id == question.session_id)
+        .first()
+    )
+    if session is None or session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to answer this question"
+        )
+
+    # ── 2. Write uploaded video to a safe temp file ───────────────────────
+    video_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+    video_path = video_tmp.name
+    try:
+        with video_tmp:
+            shutil.copyfileobj(video_file.file, video_tmp)
+
+        # ── 3. Extract audio into a second temp file ──────────────────────
+        audio_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        audio_path = audio_tmp.name
+        audio_tmp.close()
+        try:
+            extract_audio(video_path, audio_path)
+            transcript = transcribe_audio(audio_path)
+        finally:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+    finally:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+
+    # ── 4. Evaluate transcript ────────────────────────────────────────────
+    evaluation = evaluate_answer(
+        question=question.question,
+        answer=transcript
+    )
+
+    answer = InterviewAnswer(
+        question_id=question.id,
+        answer=transcript,
+        score=evaluation["score"],
+        feedback=evaluation["feedback"]
+    )
+    db.add(answer)
+    db.commit()
+    db.refresh(answer)
+
+    # ── 5. Generate next adaptive question ───────────────────────────────
+    difficulty = determine_difficulty(evaluation["score"])
+
+    analysis = (
+        db.query(ResumeAnalysis)
+        .filter(ResumeAnalysis.id == session.analysis_id)
+        .first()
+    )
+
+    generated = generate_questions(
+        skills=analysis.skills,
+        projects=analysis.projects,
+        target_role=session.target_role,
+        difficulty=difficulty
+    )
+
+    next_question_data = generated["questions"][0]
+    next_question = InterviewQuestion(
+        session_id=session.id,
+        question=next_question_data["question"],
+        difficulty=difficulty
+    )
+    db.add(next_question)
+    db.commit()
+    db.refresh(next_question)
+
+    return {
+        "transcript": transcript,
         "answer_id": answer.id,
         "score": evaluation["score"],
         "feedback": evaluation["feedback"],
         "strengths": evaluation["strengths"],
         "improvements": evaluation["improvements"],
-
         "next_question_id": next_question.id,
         "next_question": next_question.question,
         "difficulty": difficulty
     }
 
-@router.post("/adaptivr-video-answer")
-def adaptive_video_answer(
-    question_id:int,
-    video_file:UploadFile=File(...),
-    current_user:User=Depends(get_current_user),
-    db:Session=Depends(get_db)
+@router.get("/session/{session_id}")
+def get_interview_session(
+    session_id:int,
+    db:Session=Depends(get_db),
+    current_user:User=Depends(get_current_user)
 ):
-    video_path = f"temp_{video_file.filename}"
-    
-    with open(
-    video_path,
-    "wb"
-    ) as buffer:
-        shutil.copyfileobj(
-            video_file.file,
-            buffer
-        )
-    audio_path = "temp_audio.wav"
-    extract_audio(video_path,audio_path)
-    transcript=transcribe_audio(audio_path)
-    os.remove(video_path)
-    os.remove(audio_path)
-    question = db.query(InterviewQuestion).filter(InterviewQuestion.id==question_id).first()
-    if question is None:
+    session=(db.query(InterviewSession).filter(InterviewSession.id==session_id,InterviewSession.user_id==current_user.id).first())
+    if session is None:
         raise HTTPException(
             status_code=404,
-            detail="Question not found"
+            detail="Interview Session Not Found"
         )
-    evaluation = evaluate_answer(
-        question=question.question,
-        answer=transcript
-    )
-
-    answer = InterviewAnswer(
-        question_id=question.id,
-        answer=transcript,
-        score=evaluation["score"],
-        feedback=evaluation["feedback"]
-    )
-
-    db.add(answer)
-    db.commit()
-    db.refresh(answer)
-
-    difficulty = determine_difficulty(
-        evaluation["score"]
-    )
-
-    session = (
-        db.query(InterviewSession)
-        .filter(
-            InterviewSession.id == question.session_id
+    questions = (db.query(InterviewQuestion).filter(
+        InterviewQuestion.session_id == session.id
         )
-        .first()
+    .all()
     )
-
-    analysis = (
-        db.query(ResumeAnalysis)
-        .filter(
-            ResumeAnalysis.id == session.analysis_id
-        )
-        .first()
-    )
-
-    generated = generate_questions(
-        skills=analysis.skills,
-        projects=analysis.projects,
-        target_role=session.target_role,
-        difficulty=difficulty
-    )
-
-    next_question_data = generated["questions"][0]
-
-    next_question = InterviewQuestion(
-        session_id=session.id,
-        question=next_question_data["question"],
-        difficulty=difficulty
-    )
-
-    db.add(next_question)
-    db.commit()
-    db.refresh(next_question)
-
     return {
-        "transcript": transcript,
-
-        "answer_id": answer.id,
-        "score": evaluation["score"],
-        "feedback": evaluation["feedback"],
-        "strengths": evaluation["strengths"],
-        "improvements": evaluation["improvements"],
-
-        "next_question_id": next_question.id,
-        "next_question": next_question.question,
-        "difficulty": difficulty
+        "session_id": session.id,
+        "target_role": session.target_role,
+        "questions": [
+            {
+                "id": q.id,
+                "question": q.question,
+                "difficulty": q.difficulty
+            }
+            for q in questions
+        ]
     }

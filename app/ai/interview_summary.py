@@ -9,7 +9,7 @@ from langchain_core.output_parsers import JsonOutputParser
 load_dotenv()
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     groq_api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.3
 )
@@ -22,21 +22,69 @@ prompt = PromptTemplate(
         "average_score"
     ],
     template="""
-    Interview Results:
+    You are a Senior Technical Interviewer preparing the final interview report for a candidate.
 
-    {qa_data}
+IMPORTANT RULES:
 
-    Average Score:
+- Do NOT evaluate the answers again.
+- Do NOT change any scores.
+- Do NOT invent new question-level feedback.
+- Use ONLY the provided scores and feedback.
+- Your job is to summarize the interview professionally.
 
-    {average_score}
+Interview Results:
 
-    Return ONLY valid JSON.
+Average Score:
+{average_score}/10
 
-    {{
-        "strengths": [],
-        "weaknesses": [],
-        "final_feedback": ""
-    }}
+Question-wise Evaluation:
+{qa_data}
+
+Based ONLY on the above evaluation, generate a final interview report.
+
+Return ONLY valid JSON in the following format:
+
+{{
+    "summary": "A concise overall summary of the candidate's interview performance.",
+
+    "technical_strengths": [
+        "...",
+        "..."
+    ],
+
+    "communication_strengths": [
+        "...",
+        "..."
+    ],
+
+    "areas_to_improve": [
+        "...",
+        "..."
+    ],
+
+    "placement_readiness": "Ready | Almost Ready | Needs Improvement",
+
+    "recommended_topics": [
+        "...",
+        "...",
+        "..."
+    ]
+}}
+
+Guidelines:
+
+- "summary" should be 3–5 sentences.
+- "technical_strengths" should mention technologies or problem-solving strengths demonstrated during the interview.
+- "communication_strengths" should focus on clarity, confidence, and explanation quality.
+- "areas_to_improve" should be actionable and based only on the provided evaluations.
+- "placement_readiness" must be one of:
+    - Ready
+    - Almost Ready
+    - Needs Improvement
+- "recommended_topics" should contain practical topics the candidate should study next.
+- Return ONLY valid JSON.
+- Do not include markdown.
+- Do not include explanations outside the JSON.
     """
 )
 

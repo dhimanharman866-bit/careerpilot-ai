@@ -33,13 +33,13 @@ def register_user(
         "user_id":new_user.id
     }
 
-@router.get("/users",response_model=list[UserResponse])
-def get_users(
-    db:Session=Depends(get_db)
-):
-    users=db.query(User).all()
+# @router.get("/users",response_model=list[UserResponse])
+# def get_users(
+#     db:Session=Depends(get_db)
+# ):
+#     users=db.query(User).all()
 
-    return users
+#     return users
 
 @router.get("/users/{user_id}",response_model=UserResponse)
 def get_user_by_id(user_id:int,db:Session=Depends(get_db)):

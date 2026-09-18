@@ -72,7 +72,8 @@ def analyze_resume(
         skills=analysis['skills'],
         projects=analysis['projects'],
         strengths=analysis['strengths'],
-        weaknesses=analysis['weaknesses']
+        weaknesses=analysis['weaknesses'],
+        score=analysis['score']
     )
 
     db.add(analysis_db)
@@ -86,3 +87,32 @@ def analyze_resume(
         "resume_id": resume.id,
         "analysis": analysis
     }
+@router.get("/latest-analysis")
+def get_latest_analysis(current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    resume=db.query(Resume).filter(Resume.user_id==current_user.id).order_by(Resume.id.desc()).first()
+    if resume is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No Resume found"
+        )
+    analysis = (
+    db.query(ResumeAnalysis)
+    .filter(ResumeAnalysis.resume_id == resume.id)
+    .order_by(ResumeAnalysis.created_at.desc())
+    .first()
+    )
+    if analysis is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Resume is not analyzed yet"
+        )
+    return {
+        "analysis_id": analysis.id,
+        "resume_id": resume.id,
+        "skills": analysis.skills,
+        "projects": analysis.projects,
+        "strengths": analysis.strengths,
+        "weaknesses": analysis.weaknesses,
+        "score": analysis.score,
+        "created_at": analysis.created_at
+        }
