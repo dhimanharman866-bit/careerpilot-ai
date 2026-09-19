@@ -22,13 +22,17 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Read allowed frontend URL from environment variable.
-# Falls back to localhost for local development.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+# Read allowed frontend URL(s) from environment variable (comma-separated if multiple)
+raw_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+allowed_origins = [url.strip() for url in raw_frontend_url.split(",") if url.strip()]
+
+# Always include localhost for local development
+if "http://localhost:5173" not in allowed_origins:
+    allowed_origins.append("http://localhost:5173")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
