@@ -34,4 +34,14 @@ htmlcov/
 # Uploaded files (we may add later)
 uploads/
 
+# Node modules (root level)
+node_modules/
+package-lock.json
+package.json
+
+# Media files
+Sample.mp4
+output.wav
+
+
 INTERVIEW_PREP.md
