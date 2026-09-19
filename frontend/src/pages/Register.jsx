@@ -18,7 +18,7 @@ const Register = () => {
       console.log(response.data);
       navigate("/login");
     } catch (error) {
-      alert("Registration Failed");
+      alert(error.response?.data?.detail || "Registration Failed. Please try again.");
     }
   };
 

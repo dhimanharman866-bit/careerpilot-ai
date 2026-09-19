@@ -13,24 +13,31 @@ router=APIRouter()
 
 @router.post("/register")
 def register_user(
-    user:UserCreate,
-    db:Session=Depends(get_db)
+    user: UserCreate,
+    db: Session = Depends(get_db)
 ):
-    new_user=User(
+    existing_user = db.query(User).filter(
+        (User.username == user.username) | (User.email == user.email)
+    ).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Username or Email is already registered."
+        )
+
+    new_user = User(
         username=user.username,
         password=hash_password(user.password),
         email=user.email
     )
 
     db.add(new_user)
-
     db.commit()
-
     db.refresh(new_user)
 
     return {
-        "message":"User Created Succesfully",
-        "user_id":new_user.id
+        "message": "User Created Succesfully",
+        "user_id": new_user.id
     }
 
 # @router.get("/users",response_model=list[UserResponse])
