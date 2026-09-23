@@ -6,7 +6,7 @@ from app.database.database import get_db
 from app.schemas.User import UserCreate,UserResponse,UserLogin
 from app.models.user import User
 from app.utils.security import hash_password,verify_password
-from app.utils.jwt import create_access_token,verify_access_token
+from app.utils.jwt import create_access_token
 from app.dependencies.auth import get_current_user
 
 router=APIRouter()
@@ -48,10 +48,18 @@ def register_user(
 
 #     return users
 
-@router.get("/users/{user_id}",response_model=UserResponse)
-def get_user_by_id(user_id:int,db:Session=Depends(get_db)):
-    user=db.query(User).filter(User.id==user_id).first()
-
+@router.get("/users/{user_id}", response_model=UserResponse)
+def get_user_by_id(
+    user_id: int,
+    current_user: User = Depends(get_current_user),  # require authentication
+    db: Session = Depends(get_db)
+):
+    # Users can only fetch their own profile
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You are not allowed to access this user's profile.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
     return user
 
 
@@ -84,20 +92,15 @@ def login(user_data:OAuth2PasswordRequestForm = Depends(),db:Session=Depends(get
     }
 
 @router.get("/token-info")
-def token_info(token:str,db:Session=Depends(get_db)):
+def token_info(current_user: User = Depends(get_current_user)):
+    """Return basic info about the currently authenticated user.
 
-    payload=verify_access_token(token)
-
-    user_id=payload['sub']
-
-    user=(
-        db.query(User).filter(
-            User.id==int(user_id)).first()
-        )
+    Token is read from the Authorization: Bearer <token> header — never from URL params.
+    """
     return {
-        "id":user_id,
-        "username":user.username,
-        "email":user.email
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
     }
 
 @router.get("/me")

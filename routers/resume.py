@@ -16,37 +16,53 @@ router=APIRouter(
     tags=["Resume"]
 )
 
-@router.post("/upload")
-def upload_resume(file:UploadFile=File(...),current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
-    pdf_bytes=file.file.read()
+MAX_RESUME_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_MIME_TYPES = {"application/pdf"}
 
-    pdf_document=fitz.open(
+@router.post("/upload")
+def upload_resume(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # SECURITY: validate MIME type — only PDF files accepted
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only PDF files are accepted. Received content-type: '{file.content_type}'"
+        )
+
+    pdf_bytes = file.file.read(MAX_RESUME_SIZE_BYTES + 1)
+
+    # SECURITY: enforce file size limit to prevent DoS via oversized uploads
+    if len(pdf_bytes) > MAX_RESUME_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="File too large. Maximum allowed size is 5 MB."
+        )
+
+    pdf_document = fitz.open(
         stream=pdf_bytes,
         filetype="pdf"
     )    
     
-    extracted_text=""
+    extracted_text = ""
 
     for page in pdf_document:
-        extracted_text+=page.get_text()
+        extracted_text += page.get_text()
 
-    resume=Resume(
+    resume = Resume(
         user_id=current_user.id,
         filename=file.filename,
         resume_text=extracted_text
     )
 
     db.add(resume)
-
     db.commit()
-
     db.refresh(resume)
+
     return {
-        "message":"Resume uploaded successfully",
-        "resume_id":resume.id,
-        "filename":resume.filename,
-        "user_id":resume.user_id,
-        "text_preview":extracted_text[:500]
+        "message": "Resume uploaded successfully",
+        "resume_id": resume.id,
+        "filename": resume.filename,
+        "user_id": resume.user_id,
+        "text_preview": extracted_text[:500]
     }
 
 @router.post("/analyze/{resume_id}")

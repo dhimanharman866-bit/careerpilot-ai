@@ -37,7 +37,18 @@ router = APIRouter(
 
 @router.post("/generate-question/{analysis_id}")
 def generate_interview_questions(analysis_id:int,request:QuesyionGenerationRequest,current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
-    analysis=db.query(ResumeAnalysis).filter(analysis_id==ResumeAnalysis.id).first()
+    from app.models.resume import Resume
+
+    # SECURITY: verify the analysis belongs to a resume owned by current_user
+    analysis = (
+        db.query(ResumeAnalysis)
+        .join(Resume, ResumeAnalysis.resume_id == Resume.id)
+        .filter(
+            ResumeAnalysis.id == analysis_id,
+            Resume.user_id == current_user.id
+        )
+        .first()
+    )
 
     if analysis is None:
         raise HTTPException(
@@ -95,19 +106,32 @@ def generate_interview_questions(analysis_id:int,request:QuesyionGenerationReque
     }
 @router.post("/answer")
 def submit_answer(
-    request:AnswerSubmissionRequest,
-    db:Session=Depends(get_db)
+    request: AnswerSubmissionRequest,
+    current_user: User = Depends(get_current_user),  # SECURITY: require auth
+    db: Session = Depends(get_db)
 ):
-    question=(db.query(InterviewQuestion).filter(InterviewQuestion.id==request.question_id).first())
+    question = (db.query(InterviewQuestion).filter(InterviewQuestion.id == request.question_id).first())
 
     if question is None:
         raise HTTPException(
             status_code=404,
             detail="Question not found"
         )
-    evaluation=evaluate_answer(question=question.question,answer=request.answer)
 
-    answer=InterviewAnswer(
+    # SECURITY: verify the question belongs to a session owned by current_user
+    session = db.query(InterviewSession).filter(
+        InterviewSession.id == question.session_id,
+        InterviewSession.user_id == current_user.id
+    ).first()
+    if session is None:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to answer this question."
+        )
+
+    evaluation = evaluate_answer(question=question.question, answer=request.answer)
+
+    answer = InterviewAnswer(
         question_id=question.id,
         answer=request.answer,
         score=evaluation["score"],
